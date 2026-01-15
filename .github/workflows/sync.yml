@@ -2,7 +2,7 @@ name: Sync from Parent (Fork)
 
 on:
   schedule:
-    - cron: '0 */24 * * *'    # runs daily at 02:00 UTC
+    - cron: '0 2 * * *'    # runs daily at 02:00 UTC
   workflow_dispatch: {}
 
 jobs:
@@ -10,6 +10,8 @@ jobs:
     permissions:
       contents: write
     runs-on: ubuntu-latest
+    outputs:
+      has_updates: ${{ steps.check_updates.outputs.has_updates }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -49,15 +51,40 @@ jobs:
               ref: parentRepo.data.default_branch
             });
 
+            // Get latest commit on fork's default branch
+            const forkCommit = await github.rest.repos.getCommit({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: repo.data.default_branch
+            });
+
+            const parent_sha = latestCommit.data.sha;
+            const fork_sha = forkCommit.data.sha;
+            console.log(`Parent SHA: ${parent_sha}`);
+            console.log(`Fork SHA: ${fork_sha}`);
+
             return {
               parent_repo: repo.data.parent.full_name,
               parent_branch: parentRepo.data.default_branch,
               fork_default_branch: repo.data.default_branch,
-              latest_commit_sha: latestCommit.data.sha.substring(0, 7),
-              latest_commit_msg: latestCommit.data.commit.message.split('\n')[0]
+              latest_commit_sha: parent_sha.substring(0, 7),
+              latest_commit_msg: latestCommit.data.commit.message.split('\n')[0],
+              has_updates: parent_sha !== fork_sha
             }
 
+      - name: Check for updates
+        id: check_updates
+        run: |
+          has_updates=$(echo '${{ steps.repo_info.outputs.result }}' | jq -r .has_updates)
+          echo "has_updates=$has_updates" >> $GITHUB_OUTPUT
+          if [ "$has_updates" == "true" ]; then
+            echo "Updates found. Proceeding with sync."
+          else
+            echo "No updates found. Skipping sync."
+          fi
+
       - name: Add upstream remote and fetch
+        if: steps.check_updates.outputs.has_updates == 'true'
         run: |
           parent_repo=$(echo '${{ steps.repo_info.outputs.result }}' | jq -r .parent_repo)
           echo "Adding upstream remote: $parent_repo"
@@ -65,6 +92,7 @@ jobs:
           git fetch upstream --prune
 
       - name: Merge upstream into fork default branch
+        if: steps.check_updates.outputs.has_updates == 'true'
         run: |
           fork_default_branch=$(echo '${{ steps.repo_info.outputs.result }}' | jq -r .fork_default_branch)
           parent_branch=$(echo '${{ steps.repo_info.outputs.result }}' | jq -r .parent_branch)
@@ -74,6 +102,7 @@ jobs:
           git merge --no-edit "upstream/${parent_branch}"
 
       - name: Push merged changes to origin
+        if: steps.check_updates.outputs.has_updates == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -87,3 +116,11 @@ jobs:
           echo "Parent branch: $(echo '${{ steps.repo_info.outputs.result }}' | jq -r .parent_branch)"
           echo "Fork default branch: $(echo '${{ steps.repo_info.outputs.result }}' | jq -r .fork_default_branch)"
           echo "Latest upstream commit: $(echo '${{ steps.repo_info.outputs.result }}' | jq -r .latest_commit_sha) - $(echo '${{ steps.repo_info.outputs.result }}' | jq -r .latest_commit_msg)"
+
+  trigger-docker-build:
+    needs: sync
+    if: needs.sync.outputs.has_updates == 'true'
+    uses: ./.github/workflows/docker-build.yml
+    permissions:
+      contents: read
+      packages: write
