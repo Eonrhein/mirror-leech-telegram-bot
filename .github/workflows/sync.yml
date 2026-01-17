@@ -58,18 +58,24 @@ jobs:
               ref: repo.data.default_branch
             });
 
-            const parent_sha = latestCommit.data.sha;
-            const fork_sha = forkCommit.data.sha;
-            console.log(`Parent SHA: ${parent_sha}`);
-            console.log(`Fork SHA: ${fork_sha}`);
+            // Compare the fork's default branch with the parent's default branch
+            // base: the fork, head: the parent
+            const comparison = await github.rest.repos.compareCommitsWithBasehead({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              basehead: `${repo.data.default_branch}...${repo.data.parent.owner.login}:${parentRepo.data.default_branch}`
+            });
+
+            console.log(`Comparison status: ${comparison.data.status}`);
+            console.log(`Behind by: ${comparison.data.behind_by} commits`);
 
             return {
               parent_repo: repo.data.parent.full_name,
               parent_branch: parentRepo.data.default_branch,
               fork_default_branch: repo.data.default_branch,
-              latest_commit_sha: parent_sha.substring(0, 7),
+              latest_commit_sha: latestCommit.data.sha.substring(0, 7),
               latest_commit_msg: latestCommit.data.commit.message.split('\n')[0],
-              has_updates: parent_sha !== fork_sha
+              has_updates: comparison.data.behind_by > 0
             }
 
       - name: Check for updates
