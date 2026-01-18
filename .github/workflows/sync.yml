@@ -67,7 +67,8 @@ jobs:
             });
 
             console.log(`Comparison status: ${comparison.data.status}`);
-            console.log(`Behind by: ${comparison.data.behind_by} commits`);
+            console.log(`Ahead by: ${comparison.data.ahead_by} commits (upstream leading)`);
+            console.log(`Behind by: ${comparison.data.behind_by} commits (your fork leading)`);
 
             return {
               parent_repo: repo.data.parent.full_name,
@@ -75,7 +76,7 @@ jobs:
               fork_default_branch: repo.data.default_branch,
               latest_commit_sha: latestCommit.data.sha.substring(0, 7),
               latest_commit_msg: latestCommit.data.commit.message.split('\n')[0],
-              has_updates: comparison.data.behind_by > 0
+              has_updates: comparison.data.ahead_by > 0
             }
 
       - name: Check for updates
